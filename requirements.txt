@@ -1,0 +1,10 @@
+langchain-google-genai
+langchain-core
+langchain-community
+duckduckgo-search
+feedparser
+schedule
+requests
+python-dotenv
+flask
+ddgs
