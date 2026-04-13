@@ -2,12 +2,29 @@ import time
 import re
 import requests
 import feedparser
+from datetime import datetime, timedelta, timezone
 from langchain_community.tools import DuckDuckGoSearchResults
 from config import NEWSAPI_KEY, FINNHUB_KEY, SEARCH_QUERIES, RSS_FEEDS
+from email.utils import parsedate_to_datetime
 
 # Create TWO separate search tools for DuckDuckGo
 search_news = DuckDuckGoSearchResults(backend="news", num_results=15)
 search_web = DuckDuckGoSearchResults(backend="text", num_results=15) 
+
+def _is_fresh(entry, cutoff_dt):
+    """Return True if the RSS entry was published after the cutoff datetime."""
+    for field in ("published", "updated"):
+        raw = entry.get(field)
+        if raw:
+            try:
+                pub = parsedate_to_datetime(raw)
+                if pub.tzinfo is None:
+                    pub = pub.replace(tzinfo=timezone.utc)
+                return pub > cutoff_dt
+            except Exception as e:
+                print(f"Error parsing date for entry: {e}")
+                pass
+    return True
 
 def fetch_bse_announcements():
     headlines = []
@@ -101,14 +118,17 @@ def fetch_finnhub_news():
         print(f"Warning: Finnhub failed: {e}")
     return "\n".join(headlines)
 
-def fetch_rss_news():
+def fetch_rss_news(yesterday_str):
     headlines = []
+    cutoff_dt = datetime.strptime(yesterday_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     for feed_info in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_info["url"])
             source = feed_info["name"]
             count = 0
             for entry in feed.entries[:12]:
+                if not _is_fresh(entry, cutoff_dt):
+                    continue
                 title = entry.get("title", "").strip()
                 raw_summary = entry.get("summary", entry.get("description", ""))
                 summary = re.sub(r"<[^>]+>", "", raw_summary).strip()[:200]
@@ -154,7 +174,7 @@ def fetch_all_news(yesterday_str):
     finnhub = fetch_finnhub_news()
     if finnhub: sections.append("== FINNHUB MARKET NEWS ==\n" + finnhub)
     
-    rss = fetch_rss_news()
+    rss = fetch_rss_news(yesterday_str)
     if rss: sections.append("== RSS + REDDIT FEEDS ==\n" + rss)
     
     ddg = fetch_ddg_news()

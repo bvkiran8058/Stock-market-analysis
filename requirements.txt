@@ -8,3 +8,6 @@ requests
 python-dotenv
 flask
 ddgs
+yfinance
+pandas
+numpy
