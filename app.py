@@ -1,7 +1,7 @@
 import time
 import schedule
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, time as dt_time
 from flask import Flask
 
 # Import from our modular files
@@ -23,20 +23,23 @@ def run_server():
 
 # 2. Main Bot Logic
 def job():
-    # Calculate dates dynamically so they are always fresh
-    IST = timezone(timedelta(hours=5, minutes=30))
-    now = datetime.now(IST)
+    # Uses Hugging Face's default server time (UTC)
+    now = datetime.now()
     yesterday = now - timedelta(days=1)
     
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = yesterday.strftime('%Y-%m-%d')
 
-    # Ensure it only runs between 8:00 and 22:00 (adjust to your timezone if needed)
-    if not (0 <= now.hour < 22):
-        print(f"Market closed at {now.strftime('%H:%M:%S')}. Skipping.")
+    # Precise time check for 02:30 to 16:30 Server Time (UTC)
+    # This aligns perfectly with 08:00 AM to 10:00 PM IST
+    start_time = dt_time(2, 30)
+    end_time = dt_time(16, 30)
+    
+    if not (start_time <= now.time() <= end_time):
+        print(f"Market closed at {now.strftime('%H:%M:%S')} (Server Time). Skipping.")
         return
         
-    print(f"\n--- Stock Signal Run at {now.strftime('%Y-%m-%d %H:%M:%S')} ---")
+    print(f"\n--- Stock Signal Run at {now.strftime('%Y-%m-%d %H:%M:%S')} (Server Time) ---")
     try:
         # Step A: Fetch News
         raw_news = fetch_all_news(yesterday_str)
@@ -63,47 +66,34 @@ def job():
     except Exception as e:
         print(f"Error during job execution: {e}")
 
-from datetime import datetime, timedelta
-
 def premarket_job():
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
-    # Use a 1-day delta for the yesterday string
     yesterday_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
 
-    print(f"\n--- Pre-Market Watchlist at {now.strftime('%Y-%m-%d %H:%M:%S')} ---")
+    print(f"\n--- Pre-Market Watchlist at {now.strftime('%Y-%m-%d %H:%M:%S')} (Server Time) ---")
 
     try:
-        # 1. Fetch news
         raw_news = fetch_all_news(yesterday_str)
         
         if not raw_news or not raw_news.strip():
             print("No news for pre-market watchlist.")
             return
 
-        # 2. Filter news using LLM
         filtered = filter_news(raw_news, today_str, yesterday_str)
-        
-        # 3. Extract company tickers to get technicals for
         tickers = extract_tickers(filtered)
-        
-        # 4. Fetch Technical Snapshot for those tickers
         tech_data = get_technical_summary(tickers) if tickers else "N/A"
 
-        # 5. Generate the watchlist via LLM
-        # Ensure the keys match your PREMARKET_PROMPT placeholders
         watchlist = premarket_watchlist(
             filtered_news=filtered,
             tech_data=tech_data,
             today_str=today_str,
         )
         
-        # Handle response content
         watchlist_content = watchlist.content if hasattr(watchlist, "content") else str(watchlist)
 
         if watchlist_content.strip():
             header = f"<b>🚀 Pre-Market Watchlist - {now.strftime('%d %b %Y')}</b>\n\n"
-            # Ensure the response is stripped of unwanted whitespace
             send_telegram_message(header + watchlist_content.strip())
             print("Pre-market watchlist sent to Telegram.")
         else:
@@ -114,18 +104,19 @@ def premarket_job():
 
 # 3. Execution Loop
 if __name__ == "__main__":
-    # Start the Flask web server in a background thread to keep HF happy
     threading.Thread(target=run_server, daemon=True).start()
     
     print("🚀 Starting Continuous Market Analyst Bot...")
     
-    schedule.every().day.at("09:00").do(premarket_job)  
+    # Triggers at exactly 02:30 Server Time (08:00 AM IST)
+    schedule.every().day.at("02:30").do(premarket_job)  
 
-    # Schedule the job
     schedule.every(20).minutes.do(job)
-    job() # Run once immediately on startup
     
-    # Keep the main thread alive running the schedule
+    # Optional: If you want it to run immediately upon restarting the space, 
+    # you can leave job() here. Otherwise, it will wait for the next 20-min cycle.
+    job() 
+    
     while True:
         schedule.run_pending()
         time.sleep(1)
